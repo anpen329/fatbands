@@ -166,7 +166,7 @@ class NcFileViewer:
         if self.natsph == self.natom and np.all(self.iatsph == np.arange(self.natom)):
             # All atoms have been calculated and the order if ok.
             wal_sbk = np.reshape(self.ncfile['dos_fractions'].values, wshape)
-            print(wal_sbk.shape)
+            #print(wal_sbk.shape)
 
         else:
             # Need to transfer data. Note np.zeros.
@@ -261,7 +261,7 @@ class NcFileViewer:
 
 
    
-    def plot_fatbands_lview(self, e0=0, band_list=None, spin=None, l=None, fact=1.0, alpha=0.5):
+    def plot_fatbands_l(self, e0=0, band_list=None, spin=None, l=None, fact=1.0, alpha=0.5):
     #fact=1.0, ax_mat=None, lmax=None,
     #                        ylims=None, blist=None, fontsize=12, **kwargs):
         """
@@ -340,8 +340,8 @@ viewer = NcFileViewer("./Pb_SiCo_FATBANDS.nc")
 #print(viewer.lmax_atoms)
 #print(viewer.iatsph.values)
 #print(viewer.wal_sbk)
-viewer.plot_fatbands_lview(band_list=list(range(150,250)), l=1)
-plt.show()
+#viewer.plot_fatbands_l(band_list=list(range(150,250)), l=1)
+#plt.show()
 #for i in range(444):
 #    plt.plot(viewer.get_bands[0,i,:])
 #plt.show()
