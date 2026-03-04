@@ -3,7 +3,7 @@ import importlib.util
 import sys
 
 # Define your required packages
-required = {'pymatgen', 'monty', 'tabulate','numpy', 'matplotlib', 'pandas','param','xarray'}
+required = {'pymatgen', 'monty', 'tabulate','numpy', 'matplotlib', 'pandas','param','xarray', 'seaborn'}
 
 missing = []
 
@@ -34,6 +34,7 @@ from monty.functools import lazy_property
 from monty.string import marquee
 from pymatgen.core.periodic_table import Element
 import param
+import seaborn as sns
 
 
 
@@ -66,6 +67,7 @@ class NcFileViewer:
         self.natom = self.ncfile.dims['number_of_atoms']
         self.mbesslang = self.ncfile.dims["ndosfraction"]//self.natsph
         self.nsppol = self.ncfile.dims['number_of_spins']
+        self.l_to_symbol = {0: 's', 1: 'p', 2: 'd', 3: 'f', 4:'g'}
 
         ## atom species and their index
         self.species_map = {i+1: Element.from_Z(n).symbol for i, n in enumerate(self.atom_number)} 
@@ -89,11 +91,6 @@ class NcFileViewer:
             self.symbol2indices[symbol].append(index)
         for symbol in self.symbol2indices:
             self.symbol2indices[symbol]=np.array(self.symbol2indices[symbol])
-### OLD VERSION
-#        self.symbol2indices={}   
-#        for symbol in self.species_map.values():
-#         self.symbol2indices[symbol]=np.array([index for index in self.elements_system if self.elements_system[index] == symbol])
-
 
 
     def export_variables(self):
@@ -207,6 +204,32 @@ class NcFileViewer:
 
         return wl
 
+
+    def get_wl_symbol_sets(self, symbol, spin=None, band=None) -> np.ndarray:
+        """
+        Return the l-dependent DOS weights for a given type specified in terms of the
+        chemical symbol ``symbol``. The weights are summed over m and over all atoms of the same type.
+        If ``spin`` and ``band`` are not specified, the method returns the weights
+        for all spins and bands else the contribution for (spin, band).
+        """
+        if spin is None and band is None:
+            wl = np.zeros((self.lsize, self.nsppol, self.no_bands, self.nkpoints))
+            for iat in self.symbol2indices[symbol]:
+                for l in range(self.lmax_atoms[iat]+1):
+                    wl[l] += self.wal_sbk[iat, l]
+        else:
+            assert spin is not None and band is not None
+            wl = np.zeros((self.lsize, self.nkpoints))
+            for iat in self.symbol2indices[symbol]:
+                for l in range(self.lmax_atoms[iat]+1):
+                    wl[l, :] += self.wal_sbk[iat, l, spin, band, :]
+
+        return wl
+
+
+
+
+
     def get_w_symbol(self, symbol, spin=None, band=None):
         """
         Return the DOS weights for a given type specified in terms of the
@@ -259,9 +282,26 @@ class NcFileViewer:
         bands_in_eV = bands * self.Ha_to_eV
         return  bands_in_eV
 
+    @staticmethod
+    def get_high_contrast_colors(n):
+        # 'hls' or 'husl' spreads the colors evenly across the human visual spectrum
+        return sns.color_palette("husl", n)
+
+    @staticmethod
+    def get_atom_colors(n):
+        #"""Returns a list of RGBA color values for n_atoms."""
+        # 'tab10' has 10 colors. 'tab20' has 20.
+        if n <= 10:
+            cmap = plt.get_cmap('tab10')
+        else:
+            cmap = plt.get_cmap('tab20')
+        # cmap(i) returns a tuple like (0.12, 0.46, 0.70, 1.0)
+        # This list comprehension returns exactly what you asked for.
+        return [cmap(i) for i in range(n)]
 
    
-    def plot_fatbands_l(self, e0=0, band_list=None, spin=None, l=None, fact=1.0, alpha=0.5):
+    def plot_fatbands_l(self, e0=0, band_list=None, spin=None, l=None,
+                         fact=1.0, alpha=0.5,xticks=None,xval_ticks=None):
     #fact=1.0, ax_mat=None, lmax=None,
     #                        ylims=None, blist=None, fontsize=12, **kwargs):
         """
@@ -293,7 +333,7 @@ class NcFileViewer:
         ebands = self.bands_eV - e0        
         x = np.arange(self.nkpoints)
         mybands = list(range(self.no_bands)) if band_list is None else band_list
-        colors=['blue','red','green','plum']
+        colors = self.get_atom_colors(len(self.species_map))
         for i in mybands:
             ax.plot(x, ebands[0,i,:], color='black')
 
@@ -310,7 +350,20 @@ class NcFileViewer:
                     ax.fill_between(x, yup, y1, alpha=0.5, facecolor=colors[symbol-1])
                     ax.fill_between(x, ydown, y2, alpha=0.5, facecolor=colors[symbol-1],
                                     label=self.species_map[symbol] if ib == 0 else None)
-        ax.legend()
+        ax.legend(
+            loc='lower center', 
+            bbox_to_anchor=(0.5, 1.015), 
+            ncol=len(self.species_map), 
+            shadow=False, 
+            frameon=True
+        )
+        ax.set_title('l=' + self.l_to_symbol[l], pad=35)
+        ax.set_xlabel('K-point')
+        ax.set_ylabel('Energy (eV)')
+        if xticks is not None and xval_ticks is not None:
+            ax.set_xticks(xval_ticks, xticks)
+        elif xval_ticks is not None:
+            ax.set_xticks(xval_ticks)
         return fig, ax
 
 
@@ -340,8 +393,9 @@ viewer = NcFileViewer("./Pb_SiCo_FATBANDS.nc")
 #print(viewer.lmax_atoms)
 #print(viewer.iatsph.values)
 #print(viewer.wal_sbk)
-#viewer.plot_fatbands_l(band_list=list(range(150,250)), l=1)
-#plt.show()
+viewer.plot_fatbands_l(band_list=list(range(150,250)), l=1)#, xticks=['G','K','M','K'],xval_ticks=[0,30,60,90])
+#viewer.plot_fatbands_l(band_list=list(range(150,250)), l=0)
+plt.show()
 #for i in range(444):
 #    plt.plot(viewer.get_bands[0,i,:])
 #plt.show()
