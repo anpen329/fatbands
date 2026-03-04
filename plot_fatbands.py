@@ -53,6 +53,8 @@ class NcFileViewer:
         self.Ha_to_eV=27.2114 ###  1 hartree to eV = 27.2114 eV
         ########################
         self.ncfile = xr.open_dataset(nc_file)
+
+        self.prtdos=self.ncfile['prtdos']
         self.atom_spc = self.ncfile['atom_species']
         self.atom_number = self.ncfile['atomic_numbers']                
         self.lmax = self.ncfile['lmax_type']
@@ -80,6 +82,10 @@ class NcFileViewer:
         ## lmax for each atom in the system
         self.lmax_atoms = {idx: self.lmax_map[val] for idx, val in enumerate(self.elements_system.values())}
 
+        if not (self.prtdos == 3):
+            raise ValueError(
+                "Fatbands plots with LM-character require `prtdos = 3 "                
+            )
 
         
         
@@ -364,6 +370,12 @@ class NcFileViewer:
             format: format of the fig, e.g, pdf, png, etc.
         Returns: |matplotlib-Figure|
         """
+        #### Checking if the atom indices are correct ####
+        flat_at_list = [atom_idx for subset in atom_set for atom_idx in subset]
+        missing_elements = set(flat_at_list) - set(range(self.natom))
+        if missing_elements:
+            raise ValueError(f"The following atom indices are not valid: {missing_elements}")
+
 
         fig, ax= plt.subplots(figsize=(8, 6))
 
@@ -451,7 +463,7 @@ viewer = NcFileViewer("./Pb_SiCo_FATBANDS.nc")
 #plt.show()
 Pb=atom1=[0,1,2]
 Gr=atom1=[3,4,5,6,7,8,9,10]
-SiC=list(range(11,50))
+SiC=list(range(11,56))
 at_sets=[Pb,Gr,SiC]
 viewer.plot_fatbands_l_atomsets(band_list=list(range(150,250)), e0=2.77561,
                                 l=1, atom_set=at_sets, xticks=['G','K','M','K'], 
