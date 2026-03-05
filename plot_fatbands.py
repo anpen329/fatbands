@@ -203,7 +203,7 @@ class NcFileViewer:
         return wl
 
 
-    def get_wl_symbol_sets(self, atom_set, spin=None, band=None) -> np.ndarray:
+    def get_wl_symbol_sets(self, atom_subset, spin=None, band=None) -> np.ndarray:
         """
         Return l-dependent DOS weights for a given atomic subset.
         The weights are summed over m and over all atoms of the same type.
@@ -212,13 +212,13 @@ class NcFileViewer:
         """
         if spin is None and band is None:
             wl = np.zeros((self.lsize, self.nsppol, self.no_bands, self.nkpoints))
-            for iat in atom_set:
+            for iat in atom_subset:
                 for l in range(self.lmax_atoms[iat]+1):
                     wl[l] += self.wal_sbk[iat, l]
         else:
             assert spin is not None and band is not None
             wl = np.zeros((self.lsize, self.nkpoints))
-            for iat in atom_set:
+            for iat in atom_subset:
                 for l in range(self.lmax_atoms[iat]+1):
                     wl[l, :] += self.wal_sbk[iat, l, spin, band, :]
 
@@ -272,7 +272,7 @@ class NcFileViewer:
         return [cmap(i) for i in range(n)]
 
    
-    def plot_fatbands_l(self, e0=0, band_list=None, spin=None, l=None,
+    def plot_fatbands_l(self, e0=0, band_list=None, spin=None, l=None, colors=None,
                          fact=1.0, alpha=0.5,xticks=None,xval_ticks=None, ylims=None, xlims=None, **kwargs):
 
         """
@@ -280,11 +280,15 @@ class NcFileViewer:
 
         Args:
             e0: Option used to define the zero of energy in the band structure plot.
-            fact: float used to scale the stripe size.
-            l: Angular momentum used to calculate the orbital projection
-            ylims: List used to define limits for the y-axis
-            xlims: List used to define limits for the x-axis 
             band_list: List of band indices for the fatband plot. If None, all bands are included.
+            l: Angular momentum used to calculate the orbital projection.
+            colors: list containing the colores used for each stripe.
+            fact: float used to scale the stripe size.
+            alpha: controls the transparency of the stripes
+            xticks: list with labels of the ticks.
+            xval_ticks: list containing the values where the ticks will be located.
+            ylims: list used to define limits for the y-axis.
+            xlims: list used to define limits for the x-axis.
             save_path: for saving the figure in the specified path './path/name.png'.
             dpi: resolution of the saved fig.
             format: format of the fig, e.g, pdf, png, etc.
@@ -294,11 +298,15 @@ class NcFileViewer:
 
         fig, ax= plt.subplots(figsize=(8, 6))
 
+        if colors is None:
+            colors = self.get_atom_colors(len(self.species_map))
+        elif len(colors) != len(self.species_map):
+            raise ValueError("Colors must contain the same elements as atom types.")
 
         ebands = self.bands_eV - e0        
         x = np.arange(self.nkpoints)
         mybands = list(range(self.no_bands)) if band_list is None else band_list
-        colors = self.get_atom_colors(len(self.species_map))
+        
         for i in mybands:
             ax.plot(x, ebands[0,i,:], color='black')
 
@@ -351,7 +359,7 @@ class NcFileViewer:
 
         return fig, ax
 
-    def plot_fatbands_l_atomsets(self, e0=0, band_list=None, spin=None, l=None, atom_set=None,
+    def plot_fatbands_l_atomsets(self, e0=0, band_list=None, spin=None, l=None, atom_set=None, colors=None,
                          fact=1.0, alpha=0.5,xticks=None,xval_ticks=None, ylims=None, xlims=None, **kwargs):
 
         """
@@ -359,12 +367,16 @@ class NcFileViewer:
 
         Args:
             e0: Option used to define the zero of energy in the band structure plot.
-            fact: float used to scale the stripe size.
+            band_list: List of band indices for the fatband plot. If None, all bands are included.
             l: Angular momentum used to calculate the orbital projection.
             atom_set: subsets of atoms for which the orbital projected will be calculated.
+            colors: list containing the colores used for each stripe.
+            fact: float used to scale the stripe size.
+            alpha: controls the transparency of the stripes
+            xticks: list with labels of the ticks.
+            xval_ticks: list containing the values where the ticks will be located.
             ylims: List used to define limits for the y-axis.
             xlims: List used to define limits for the x-axis.
-            band_list: List of band indices for the fatband plot. If None, all bands are included.
             save_path: for saving the figure in the specified path './path/name.png'.
             dpi: resolution of the saved fig.
             format: format of the fig, e.g, pdf, png, etc.
@@ -376,6 +388,10 @@ class NcFileViewer:
         if missing_elements:
             raise ValueError(f"The following atom indices are not valid: {missing_elements}")
 
+        if colors is None:
+            colors = self.get_atom_colors(len(atom_set))
+        elif len(colors) != len(atom_set):
+            raise ValueError("Colors must contain the same elements as atomic subsets.")
 
         fig, ax= plt.subplots(figsize=(8, 6))
 
@@ -383,7 +399,7 @@ class NcFileViewer:
         ebands = self.bands_eV - e0        
         x = np.arange(self.nkpoints)
         mybands = list(range(self.no_bands)) if band_list is None else band_list
-        colors = self.get_atom_colors(len(self.species_map))
+
         for i in mybands:
             ax.plot(x, ebands[0,i,:], color='black')
 
@@ -392,7 +408,7 @@ class NcFileViewer:
                 yup = ebands[spin, band,:]
                 ydown = yup
                 for set_idx, at_set in enumerate(atom_set):
-                    wlk = self.get_wl_symbol_sets(atom_set=at_set, spin=spin, band=band) * (fact / 2)
+                    wlk = self.get_wl_symbol_sets(atom_subset=at_set, spin=spin, band=band) * (fact / 2)
                     w = wlk[l]
                     #print(w.shape)
                     y1, y2 = yup + w, ydown - w
@@ -445,62 +461,3 @@ class NcFileViewer:
 
 
 
-# --- Execution ---
-viewer = NcFileViewer("./Pb_SiCo_FATBANDS.nc")
-
-
-#self.iatsph = self.ncfile["iatsph"]
-
-# Export both files
-#print(viewer.species_map.values())
-#print(viewer.lmax_map)
-#print(viewer.elements_system)
-#print(viewer.lmax_atoms)
-#print(viewer.iatsph.values)
-#print(viewer.wal_sbk)
-#viewer.plot_fatbands_l(band_list=list(range(150,250)), l=1, xticks=['G','K','M','K'],xval_ticks=[0,30,60,90])
-#viewer.plot_fatbands_l(band_list=list(range(150,250)), l=0)
-#plt.show()
-Pb=atom1=[0,1,2]
-Gr=atom1=[3,4,5,6,7,8,9,10]
-SiC=list(range(11,50))
-at_sets=[Pb,Gr,SiC]
-viewer.plot_fatbands_l_atomsets(band_list=list(range(150,250)), e0=2.77561,
-                                l=1, atom_set=at_sets, xticks=['G','K','M','K'], 
-                                xval_ticks=[0,30,60,90],
-                                save_path='./test_1.png')
-#plt.show()
-
-#for i in range(444):
-#    plt.plot(viewer.get_bands[0,i,:])
-#plt.show()
-#print(viewer.symbol2indices)
-#wl=viewer.get_wl_symbol_sets(atom_set=[0,1,2])
-#print(wl.shape)
-#sp=viewer.get_spilling()
-#print(sp.shape)
-#print(sp[0,222,:])
-#print(viewer.lsize)
-#test=viewer.wal_sbk()
-#dimensions=viewer.export_dimensions()
-
-#print(viewer.ncfile['eigenvalues'])
-#print(viewer.ncfile.dims['max_number_of_states'])
-
-#if viewer.prtdos == 3:
-# print('it is taking the value', viewer.prtdos.values)
-#print(viewer.prtdos.values)
-
-#print(viewer.mbesslang)
-#eigenv=viewer.ncfile['eigenvalues']
-#elements, lmax= viewer.atomic_species()
-#print(elements)
-#print(lmax)
-#print(viewer.atomic_species())
-#print(viewer.ncfile['lmax_type'].values)
-#print(elements_system)
-
-
-
-#plt.plot(kpoints,eigenv[0,:,:])
-#plt.show()
