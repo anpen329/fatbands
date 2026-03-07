@@ -66,6 +66,11 @@ class FatbandsPlotter:
         self.eigenv = self.ncfile['eigenvalues']
         self.natsph = self.ncfile.dims['natsph']
         self.natom = self.ncfile.dims['number_of_atoms']
+        # If usepaw == 0, lmax_type gives the max l included in the non-local part of Vnl
+        #   The wavefunction can have l-components > lmax_type, especially if vloc = vlmax.
+        # If usepaw == 1, lmax_type represents the max l included in the PAW basis set.
+        #   The AE wavefunction cannot have more ls than l-max if pawprtdos == 2 and
+        #   the cancellation between PS-onsite and the smooth part is exact.
         self.mbesslang = self.ncfile.dims["ndosfraction"]//self.natsph
         self.nsppol = self.ncfile.dims['number_of_spins']
         self.l_to_symbol = {0: 's', 1: 'p', 2: 'd', 3: 'f', 4:'g'}
@@ -143,15 +148,16 @@ class FatbandsPlotter:
         # Read dos_fraction_m from file and build wal_sbk array of shape
         # [natom, lmax, nsppol, mband, nkpt].
         #
-        # In abinit the **Fortran** array has shape --> self.ncfile['dos_fractions']
+        # In abinit the **Fortran** array has shape 
+        #--> self.ncfile['dos_fractions'](ndosfraction, number_of_spins, max_number_of_states, number_of_kpoint)
+        # ndosfraction=natoms*5
         #   dos_fractions(nkpt,mband,nsppol,ndosfraction)
         #
         # Note that Abinit allows the users to select a subset of atoms with iatsph. Moreover the order
         # of the atoms could differ from the one in the structure even when natom == natsph (unlikely but possible).
         # To keep it simple, the code always operate on an array dimensioned with the total number of atoms
         # Entries that are not computed are set to zero and a warning is issued.
-        #for i, iatom in enumerate(self.iatsph.values):
-            #print(i,'      ',iatom)       
+    
         if self.prtdos != 3:
             raise RuntimeError(f"The file does not contain L-DOS since {self.prtdos=}")
 
@@ -163,7 +169,6 @@ class FatbandsPlotter:
             #print(wal_sbk.shape)
 
         else:
-            # Need to transfer data. Note np.zeros.
             wal_sbk = np.zeros(wshape)
             if self.natsph == self.natom and np.any(self.iatsph != np.arange(self.natom)):
                 print("Will rearrange filedata since iatsp != [1, 2, ...])")
@@ -179,6 +184,56 @@ class FatbandsPlotter:
                     wal_sbk[iatom] = filedata[i]
         
         return wal_sbk    # Return it
+
+
+    def _read_walm_sbk(self, key="dos_fraction_m"):
+        # Read dos_fraction_m from file and build walm_sbk array of shape
+        # [natom, lmax**2, nsppol, mband, nkpt].
+        #
+        # In abinit the **Fortran** array has shape
+        #   dos_fractions_m(nkpt,mband,nsppol,ndosfraction*mbesslang*m_dos_flag)
+        #
+        # Note that Abinit allows the users to select a subset of atoms with iatsph. Moreover the order
+        # of the atoms could differ from the one in the structure even when natom == natsph (unlikely but possible).
+        # To keep it simple, the code always operate on an array dimensioned with the total number of atoms
+        # Entries that are not computed are set to zero and a warning is issued.
+        if self.prtdos != 3:
+            raise RuntimeError("The file does not contain L-DOS since prtdos=%i" % self.prtdos)
+        if self.prtdosm == 0:
+            raise RuntimeError("The file does not contain LM-DOS since prtdosm=%i" % self.prtdosm)
+
+        wshape = (self.natom, self.mbesslang**2, self.nsppol, self.mband, self.nkpt)
+
+        if self.natsph == self.natom and np.all(self.iatsph == np.arange(self.natom)):
+            # All atoms have been calculated and the order if ok.
+            walm_sbk = np.reshape(self.reader.read_value(key), wshape)
+
+        else:
+            # Need to transfer data. Note np.zeros.
+            walm_sbk = np.zeros(wshape)
+            if self.natsph == self.natom and np.any(self.iatsph != np.arange(self.natom)):
+                print("Will rearrange filedata since iatsp != [1, 2, ...])")
+                filedata = np.reshape(self.reader.read_value(key), wshape)
+                for i, iatom in enumerate(self.iatsph):
+                    walm_sbk[iatom] = filedata[i]
+            else:
+                print("natsph < natom. Will set to zero the PJDOS contributions for the atoms that are not included.")
+                assert self.natsph < self.natom
+                filedata = np.reshape(self.reader.read_value(key),
+                                     (self.natsph, self.mbesslang**2, self.nsppol, self.mband, self.nkpt))
+                for i, iatom in enumerate(self.iatsph):
+                    walm_sbk[iatom] = filedata[i]
+
+        # In principle, this should never happen (unless there's a bug in Abinit or a
+        # very bad cancellation between the FFT and the PS-PAW term (pawprtden=0).
+        num_neg = np.sum(walm_sbk < 0)
+        if num_neg:
+            print("WARNING: There are %d (%.1f%%) negative entries in LDOS weights" % (
+                  num_neg, 100 * num_neg / walm_sbk.size))
+
+        return walm_sbk
+
+
 
     def get_wl_symbol(self, symbol, spin=None, band=None) -> np.ndarray:
         """
