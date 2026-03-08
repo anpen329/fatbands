@@ -278,6 +278,33 @@ class FatbandsPlotter:
         return wl
 
 
+    def get_wlm_symbol_sets(self, atom_subset, l_val, spin=None, band=None) -> np.ndarray:
+        """
+        Return m-resolved DOS weights for a given atomic subset and angular momentum l.
+        The weights are summed the atoms in the substed for each m value
+        If ``spin`` and ``band`` are not specified, the weights
+        for all spins and bands else the contribution for (spin, band) are returned.
+        """
+        m_vals=2 * l_val + 1
+        if spin is None and band is None:
+            wl = np.zeros((m_vals, self.nsppol, self.no_bands, self.nkpoints))
+            for iat in atom_subset:
+                for m in range(m_vals):
+                    wl[m] += self.walm_sbk[iat, l_val**2+m]
+        else:
+            assert spin is not None and band is not None
+            wl = np.zeros((m_vals, self.nkpoints))
+            for iat in atom_subset:
+                for m in range(m_vals):
+                    wl[m, :] += self.walm_sbk[iat, l_val**2+m, spin, band, :]
+
+        return wl
+
+
+
+
+
+
     def get_spilling(self, spin=None, band=None):
         """
         Return the spilling parameter --> electronic part that is not captured by local basis set
@@ -313,7 +340,7 @@ class FatbandsPlotter:
         return sns.color_palette("husl", n)
 
     @staticmethod
-    def get_atom_colors(n):
+    def get_colors(n):
         #"""Returns a list of RGBA color values for n_atoms."""
         # 'tab10' has 10 colors. 'tab20' has 20.
         if n <= 10:
@@ -350,11 +377,8 @@ class FatbandsPlotter:
             # Optional: return the remaining kwargs if you need them for show()
             return kwargs
 
-
-
-
     def plot_fatbands_l(self, e0=0, band_list=None, spin=None, l=None, colors=None, symbol=None,
-                         fact=1.0, alpha=0.5,xticks=None,xval_ticks=None, ylims=None, xlims=None, **kwargs):
+                         fact=1.0, transparency=0.5,xticks=None,xval_ticks=None, ylims=None, xlims=None, **kwargs):
 
         """
         Plot the electronic fatbands for a specific L. Atoms are grouped by type.
@@ -366,7 +390,7 @@ class FatbandsPlotter:
             colors: list containing the colores used for each stripe.
             symbols: Atom type(s) included in the fatbands. Can be a string e.g 'Pb'. A list or an array of strings. 
             fact: float used to scale the stripe size.
-            alpha: controls the transparency of the stripes
+            transparency: controls the transparency of the stripes
             xticks: list with labels of the ticks.
             xval_ticks: list containing the values where the ticks will be located.
             ylims: list used to define limits for the y-axis.
@@ -403,7 +427,7 @@ class FatbandsPlotter:
         fig, ax= plt.subplots(figsize=(8, 6))
 
         if colors is None:
-            colors = self.get_atom_colors(len(self.species_map))
+            colors = self.get_colors(len(self.species_map))
         elif len(colors) != len(self.species_map):
             raise ValueError("Colors must contain the same elements as atom types.")
 
@@ -424,8 +448,8 @@ class FatbandsPlotter:
                     #print(w.shape)
                     y1, y2 = yup + w, ydown - w
                     # Add width around each band. Only the [0,0] plot has the legend.
-                    ax.fill_between(x, yup, y1, alpha=0.5, facecolor=colors[idx])
-                    ax.fill_between(x, ydown, y2, alpha=0.5, facecolor=colors[idx],
+                    ax.fill_between(x, yup, y1, alpha=transparency, facecolor=colors[idx])
+                    ax.fill_between(x, ydown, y2, alpha=transparency, facecolor=colors[idx],
                                     label=symbol if ib == 0 else None)
         ax.legend(
             loc='lower center', 
@@ -457,7 +481,7 @@ class FatbandsPlotter:
         return fig, ax
 
     def plot_fatbands_l_atomsets(self, e0=0, band_list=None, spin=None, l=None, atom_set=None, colors=None,
-                         fact=1.0, alpha=0.5,xticks=None,xval_ticks=None, ylims=None, xlims=None, **kwargs):
+                         fact=1.0, transparency=0.5,xticks=None,xval_ticks=None, ylims=None, xlims=None, **kwargs):
 
         """
         Plot the electronic fatbands for a specific L for each subset of atoms defined
@@ -469,7 +493,7 @@ class FatbandsPlotter:
             atom_set: subsets of atoms for which the orbital projected will be calculated.
             colors: list containing the colores used for each stripe.
             fact: float used to scale the stripe size.
-            alpha: controls the transparency of the stripes
+            transparency: controls the transparency of the stripes
             xticks: list with labels of the ticks.
             xval_ticks: list containing the values where the ticks will be located.
             ylims: List used to define limits for the y-axis.
@@ -497,7 +521,7 @@ class FatbandsPlotter:
             raise ValueError(f"The following atom indices are not valid: {missing_elements}")
 
         if colors is None:
-            colors = self.get_atom_colors(len(atom_set))
+            colors = self.get_colors(len(atom_set))
         elif len(colors) != len(atom_set):
             raise ValueError("Colors must contain the same elements as atomic subsets.")
 
@@ -523,8 +547,8 @@ class FatbandsPlotter:
                     #print(w.shape)
                     y1, y2 = yup + w, ydown - w
                     # Add width around each band. Only the [0,0] plot has the legend.
-                    ax.fill_between(x, yup, y1, alpha=0.5, facecolor=colors[set_idx])
-                    ax.fill_between(x, ydown, y2, alpha=0.5, facecolor=colors[set_idx],
+                    ax.fill_between(x, yup, y1, alpha=transparency, facecolor=colors[set_idx])
+                    ax.fill_between(x, ydown, y2, alpha=transparency, facecolor=colors[set_idx],
                                     label=f"set {set_idx+1}"  if ib == 0 else None)
         ax.legend(
             loc='lower center', 
@@ -555,10 +579,8 @@ class FatbandsPlotter:
 
         return fig, ax
 
-
-
-    def plot_fatbands_mview(self, iatom, e0="fermie", fact=1.0, l=None, 
-                            ylims=None, blist=None, **kwargs):
+    def plot_fatbands_mview(self, e0=0, band_list=None, spin=None, l=None, atom_set=None, colors=None,
+                         fact=1.0, transparency=0.5,xticks=None,xval_ticks=None, ylims=None, xlims=None, **kwargs):
         """
         Plot the electronic fatbands grouped by LM.
 
@@ -569,72 +591,118 @@ class FatbandsPlotter:
                 -  Number e.g ``e0 = 0.5``: shift all eigenvalues to have zero energy at 0.5 eV
                 -  None: Don't shift energies, equivalent to ``e0 = 0``
             fact:  float used to scale the stripe size.
-            lmax: Maximum L included in plot. None means full set available on file.
             ylims: Set the data limits for the y-axis. Accept tuple e.g. ``(left, right)``
                    or scalar e.g. ``left``. If left (right) is None, default values are used
             blist: List of band indices for the fatband plot. If None, all bands are included
 
         Returns: |matplotlib-Figure|
         """
+        fig, ax= plt.subplots(figsize=(8, 6))
+
+        m_vals = 2 * l + 1
 
 
+        idx_to_name = {
+            0: 's',
+            1: 'py',
+            2: 'pz',
+            3: 'px',
+            4: 'dxy',
+            5: 'dyz',
+            6: 'dz2',
+            7: 'dxz',
+            8: 'dx2-y2',
+            9: 'f_y3x2',
+            10: 'f_xyz',
+            11: 'f_yz2',
+            12: 'f_z3',
+            13: 'f_xz2',
+            14: 'f_zx2y2',
+            15: 'f_x3y2',
+            16: 'g0',
+            17: 'g1',
+            18: 'g2',
+            19: 'g3',
+            20: 'g4',
+            21: 'g5',
+            22: 'g6',
+            23: 'g7',
+            24: 'g8'
+        }
+        
+        ebands = self.bands_eV - e0        
+        x = np.arange(self.nkpoints)
+        mybands = list(range(self.no_bands)) if band_list is None else band_list
+
+        
+#        for spin in range(self.nsppol):
+#            ebands.plot_ax(ax, e0, spin=spin, **self.eb_plotax_kwargs(spin))
 
 
-        mylmax = self.lmax_atom[iatom] if lmax is None else lmax
+        if atom_set is None:
+            raise ValueError("At least one atom subset must be specified")
+    
+        # If it's a list of ints, make it a list of one list
+        if atom_set is not None:
+            # Check if the first element is an integer. 
+            # If so, the user passed [1, 2, 3] instead of [[1, 2, 3]]
+            if isinstance(atom_set[0], (int, np.integer)):
+                atom_set = [atom_set]
 
-        # Build plot grid.
-        import matplotlib.pyplot as plt
-        from matplotlib.gridspec import GridSpec #, GridSpecFromSubplotSpec
-        fig = plt.figure()
-        nrows, ncols = 2 * (mylmax+1), mylmax + 1
-        gspec = GridSpec(nrows=nrows, ncols=ncols, wspace=0.1, hspace=0.1)
+        flat_at_list = [atom_idx for subset in atom_set for atom_idx in subset]
+        missing_elements = set(flat_at_list) - set(range(self.natom))
+        if missing_elements:
+            raise ValueError(f"The following atom indices are not valid: {missing_elements}")
 
-        # Build plot grid (L along the column, each L has 2L+1 subplots).
-        # ax_lim[(l, im)] gives the axis.
-        ax_lim = {}
-        for im in range(nrows):
-            for l in range(ncols):
-                k = (l, im)
-                ax00 = None if l == 0 else ax_lim[(0, 0)]
-                ax = plt.subplot(gspec[im, l], sharex=ax00, sharey=ax00)
-                if im < 2*l + 1:
-                    #ax.set_title("l=%d, m=%d" % (l, im - l))
-                    ax_lim[k] = ax
-                    ax.grid(True)
-                else:
-                    ax.axis("off")
+        if colors is None:
+            colors = self.get_colors(len(atom_set) * (2*l+1))
+#        elif len(colors) != len(atom_set):
+#            raise ValueError("Colors must contain the same elements as atomic subsets.")
 
-        ebands = self.ebands
-        e0 = ebands.get_e0(e0)
-        x = np.arange(self.nkpt)
-        mybands = range(ebands.mband) if blist is None else blist
+        for spin in range(self.nsppol):            
+            for ib, band in enumerate(mybands):
+                ax.plot(x, ebands[0,band,:], color='black', zorder=0) # band structure
+                yup = ebands[spin, band,:]
+                ydown = yup
+                for set_idx, at_set in enumerate(atom_set): 
+                    for mval in range(m_vals):                         
+                        wlk_m = self.get_wlm_symbol_sets(atom_subset=at_set, spin=spin, l_val=l, band=band) * (fact / 2)
+                        w = wlk_m[mval]
+                        y1, y2 = yup + w, ydown - w
+                        # Add width around each band.
+                        ax.fill_between(x, yup, y1, alpha=transparency, facecolor=colors[mval + m_vals*set_idx])
+                        ax.fill_between(x, ydown, y2, alpha=transparency, facecolor=colors[mval + m_vals*set_idx],
+                        label=f"set {set_idx+1} - {idx_to_name[l**2 + mval]}"  if ib == 0 else None)                        
 
-        for lim, ax in ax_lim.items():
-            l, im = lim[0], lim[1]
-            for spin in range(self.nsppol):
-                ebands.plot_ax(ax, e0, spin=spin, **self.eb_plotax_kwargs(spin))
+        ax.legend(
+            loc='upper left',           # The point on the legend we are 'holding'
+            bbox_to_anchor=(1.02, 1),   # Coordinates: slightly right of the plot (x=1.02), at the top (y=1)
+            ncol=1,                     # Standard single column for a vertical list
+            shadow=False, 
+            frameon=True
+        )
+        ax.set_title('l=' + self.l_to_symbol[l], pad=35)
+        ax.set_xlabel('K-point')
+        ax.set_ylabel('Energy (eV)')
 
-            if im == 2 * l:
-                ebands.decorate_ax(ax)
-            #if l > 0:
-            #    ax.set_ylabel("")
+        if ylims is not None:
+            ax.set_ylim(ylims[0],ylims[1])
 
-            for spin in range(self.nsppol):
-                for band in mybands:
-                    #print("band:", band)
-                    yup = ebands.eigens[spin, :, band] - e0
-                    ydown = yup
+        if xlims is not None:
+            ax.set_xlim(xlims[0],xlims[1])
 
-                    w = self.walm_sbk[iatom,  l**2 + im, spin, band, :] * (fact / 2)
-                    y1, y2 = yup + w, ydown - w
-                    # Add width around each band.
-                    ax.fill_between(x, yup, y1, alpha=self.alpha, facecolor=self.l2color[l])
-                    ax.fill_between(x, ydown, y2, alpha=self.alpha, facecolor=self.l2color[l])
-                    yup, ydown = y1, y2
+        if xval_ticks is not None:
+            # Si hay posiciones, las ponemos. Si además hay etiquetas, se pasan como 'labels'
+            ax.set_xticks(xval_ticks, labels=xticks)
+        elif xticks is not None:
+            # Si hay etiquetas pero no posiciones (xval_ticks es None)
+            raise ValueError("Values for the ticks not defined")
 
-            set_axlims(ax, ylims, "y")
 
-        return fig
+        self._save_and_handle_kwargs(fig, **kwargs)
+
+
+        return fig, ax
 
 
 
@@ -651,18 +719,20 @@ viewer = FatbandsPlotter("../sample_data/Pb_SiCo_FATBANDS.nc")
 #print(viewer.lmax_atoms)
 #print(viewer.iatsph.values)
 #print(viewer.wal_sbk)
-#viewer.plot_fatbands_l_atomsets(band_list=list(range(150,250)), l=1, xticks=['G','K','M','K'],xval_ticks=[0,30,60,90],
-#save_path='test_2.png')
-#viewer.plot_fatbands_l(band_list=list(range(150,250)), l=0)
-#plt.show()
 Pb=atom1=[0,1,2]
-Gr=atom1=[3,4,5,6,7,8,9,10]
-SiC=list(range(11,50))
-at_sets=[Pb,Gr,SiC]
-viewer.plot_fatbands_l(band_list=list(range(150,250)), e0=2.77561,
-                                l=1,ylims=[-2,2],
-                                xval_ticks=[0,30,60,90],
-                                save_path='./test_2.png')
+#Gr=atom1=[3,4,5,6,7,8,9,10]
+#SiC=list(range(11,50))
+at_sets=[Pb]#,Gr,SiC]
+viewer.plot_fatbands_mview(band_list=list(range(150,250)), e0=2.77561,
+                                l=1,ylims=[-2,2], atom_set=at_sets,
+                                xval_ticks=[0,30,60,90])
+#viewer.plot_fatbands_l(band_list=list(range(150,250)), l=0)
+plt.show()
+
+#viewer.plot_fatbands_l(band_list=list(range(150,250)), e0=2.77561,
+#                                l=1,ylims=[-2,2],
+#                                xval_ticks=[0,30,60,90],
+#                                save_path='./test_2.png')
 #plt.show()
 
 #for i in range(444):
