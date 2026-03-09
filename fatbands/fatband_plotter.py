@@ -205,7 +205,7 @@ class FatbandsPlotter:
         if self.natsph == self.natom and np.all(self.iatsph == np.arange(self.natom)):
             # All atoms have been calculated and the order if ok.
             walm_sbk = np.reshape(self.ncfile['dos_fractions_m'].values, wshape)
-            print(walm_sbk.shape)
+            #print(walm_sbk.shape)
 
         else:
             # Need to transfer data. Note np.zeros.
@@ -400,18 +400,66 @@ class FatbandsPlotter:
             # Optional: return the remaining kwargs if you need them for show()
             return kwargs
 
-    def plot_fatbands_l(self, e0=0, band_list=None, spin=None, l=None, colors=None, symbol=None,
-                         fact=1.0, transparency=0.5,xticks=None,xval_ticks=None, ylims=None, xlims=None, **kwargs):
-
+    def _apply_standard_formatting(self, ax, l, xticks=None, xval_ticks=None, ylims=None, xlims=None):
         """
-        Plot the electronic fatbands for a specific L. Atoms are grouped by type.
+        Helper to apply consistent styling, labels, and axis limits to band plots.
+        """
+        # Set the title based on the angular momentum symbol
+        l_name = self.l_to_symbol.get(l, str(l))
+        ax.set_title(f'l = {l_name}', pad=35, fontsize=14, fontweight='bold')
+        
+        # Axis labels
+        ax.set_xlabel('K-point', fontsize=12)
+        ax.set_ylabel('Energy (eV)', fontsize=12)
 
+        # Handle Y-axis limits (Energy)
+        if ylims is not None:
+            ax.set_ylim(ylims[0], ylims[1])
+
+        # Handle X-axis limits (K-points)
+        if xlims is not None:
+            ax.set_xlim(xlims[0], xlims[1])
+
+        # Handle Custom K-point Ticks (High Symmetry Points)
+        if xval_ticks is not None:
+            # If positions are provided, we can set them. 
+            # Labels (xticks) are optional but recommended if xval_ticks is used.
+            ax.set_xticks(xval_ticks)
+            if xticks is not None:
+                ax.set_xticklabels(xticks)
+        elif xticks is not None:
+            # If the user gave labels but forgot positions, it's an error
+            raise ValueError("xticks provided without xval_ticks. Cannot place labels.")
+
+        # Standard Legend Formatting
+        ax.legend(
+            loc='upper left',
+            bbox_to_anchor=(1.02, 1), # Places legend outside the plot area
+            borderaxespad=0.,
+            ncol=1,
+            frameon=True,
+            fancybox=True,
+            shadow=False
+        )
+        
+
+
+###########################################################################################
+###########################################################################################
+###########################################################################################
+    def plot_fatbands_symbol(self, e0=0, band_list=None, l=None, symbol=None, symbol_m=None, 
+                            colors=None, colors_m=None, fact=1.0, transparency=0.5,
+                            xticks=None, xval_ticks=None, ylims=None, xlims=None, **kwargs):
+        """
+        Plot the L and LM-decomposed electronic fatbands for the atom type given by symbol and symbol_m respectively.
         Args:
             e0: Option used to define the zero of energy in the band structure plot.
             band_list: List of band indices for the fatband plot. If None, all bands are included.
             l: Angular momentum used to calculate the orbital projection.
-            colors: list containing the colores used for each stripe.
-            symbols: Atom type(s) included in the fatbands. Can be a string e.g 'Pb'. A list or an array of strings. 
+            colors and colors_m: list containing the colores used for plotting the contributions 
+                                 of the L and LM resolve plots respectively.
+            symbol: Define the atomic species for the the L decomposition.
+            symbol_m: Define the atomic species for the the LM decomposition.
             fact: float used to scale the stripe size.
             transparency: controls the transparency of the stripes
             xticks: list with labels of the ticks.
@@ -425,372 +473,49 @@ class FatbandsPlotter:
         """
         if l is None:            
             raise ValueError("Angular momentum not specified.")
-    
-        # string elements in self.species_map.values()
+        if symbol is None and symbol_m is None:
+            raise ValueError("No atom types were specified.")
+
+        ####################PREPARE AND VALIDATE SYMBOL LISTS ####################################
         valid_species = set(self.species_map.values())
-  
-        #  If nothing is specified, use all species in the system
-        if symbol is None:            
-            atm_symbols = valid_species 
-
-        elif isinstance(symbol, str):
-            # If it's a single string "Si", wrap it in a list ["Si"]
-            atm_symbols = [symbol]
-        elif isinstance(symbol, (list, np.ndarray)):
-            # If it's already a list or numpy array, use it directly
-            atm_symbols = list(symbol)
-        else:
-            # Handle Xarray or other iterables safely
-            atm_symbols = list(symbol)
-        #Check that every requested symbol actually exists in the file
         
-        for s in atm_symbols:
+        atm_symbols = ([symbol] if isinstance(symbol, str) else list(symbol)) if symbol is not None else []
+        atm_symbols_m = ([symbol_m] if isinstance(symbol_m, str) else list(symbol_m)) if symbol_m is not None else []
+
+        ################### CHECK FOR OVERLAP ###################
+        # Plot the L and LM contribution of the same atoms is redundant.
+        overlap = set(atm_symbols).intersection(set(atm_symbols_m))
+        if overlap:
+            raise ValueError(f"Elements cannot be repeated in both 'symbol' and 'symbol_m'. "
+                             f"Repeated: {list(overlap)}")
+
+        # Validate existence in file
+        for s in atm_symbols + atm_symbols_m:
             if s not in valid_species:
-                raise ValueError(f"Incorrect element specified: '{s}'. "
-                                 f"Valid species in this file are: {valid_species}")
+                raise ValueError(f"Incorrect element: '{s}'. Valid species: {valid_species}")
 
-
-        fig, ax= plt.subplots(figsize=(8, 6))
-
-        if colors is None:
-            colors = self.get_colors(len(self.species_map))
-        elif len(colors) != len(self.species_map):
-            raise ValueError("Colors must contain the same elements as atom types.")
-
-        ebands = self.bands_eV - e0        
-        x = np.arange(self.nkpoints)
-        mybands = list(range(self.no_bands)) if band_list is None else band_list
-        
-        for i in mybands:
-            ax.plot(x, ebands[0,i,:], color='black')
-
-        for spin in range(self.nsppol):            
-            for ib, band in enumerate(mybands):
-                yup = ebands[spin, band,:]
-                ydown = yup
-                for idx, symbol in enumerate(atm_symbols):
-                    wlk = self.get_wl_symbol(symbol, spin=spin, band=band) * (fact / 2)
-                    w = wlk[l]
-                    #print(w.shape)
-                    y1, y2 = yup + w, ydown - w
-                    # Add width around each band. Only the [0,0] plot has the legend.
-                    ax.fill_between(x, yup, y1, alpha=transparency, facecolor=colors[idx])
-                    ax.fill_between(x, ydown, y2, alpha=transparency, facecolor=colors[idx],
-                                    label=symbol if ib == 0 else None)
-        ax.legend(
-            loc='lower center', 
-            bbox_to_anchor=(0.5, 1.015), 
-            ncol=len(self.species_map), 
-            shadow=False, 
-            frameon=True
-        )
-        ax.set_title('l=' + self.l_to_symbol[l], pad=35)
-        ax.set_xlabel('K-point')
-        ax.set_ylabel('Energy (eV)')
-
-        if ylims is not None:
-            ax.set_ylim(ylims[0],ylims[1])
-
-        if xlims is not None:
-            ax.set_xlim(xlims[0],xlims[1])
-
-        if xval_ticks is not None:
-            # Si hay posiciones, las ponemos. Si además hay etiquetas, se pasan como 'labels'
-            ax.set_xticks(xval_ticks, labels=xticks)
-        elif xticks is not None:
-            # Si hay etiquetas pero no posiciones (xval_ticks es None)
-            raise ValueError("Values for the ticks not defined")
-
-        self._save_and_handle_kwargs(fig, **kwargs)
-
-
-        return fig, ax
-
-    def plot_fatbands_l_atomsets(self, e0=0, band_list=None, spin=None, l=None, atom_set=None, colors=None,
-                         fact=1.0, transparency=0.5,xticks=None,xval_ticks=None, ylims=None, xlims=None, **kwargs):
-
-        """
-        Plot the electronic fatbands for a specific L for each subset of atoms defined
-
-        Args:
-            e0: Option used to define the zero of energy in the band structure plot.
-            band_list: List of band indices for the fatband plot. If None, all bands are included.
-            l: Angular momentum used to calculate the orbital projection.
-            atom_set: subsets of atoms for which the orbital projected will be calculated.
-            colors: list containing the colores used for each stripe.
-            fact: float used to scale the stripe size.
-            transparency: controls the transparency of the stripes
-            xticks: list with labels of the ticks.
-            xval_ticks: list containing the values where the ticks will be located.
-            ylims: List used to define limits for the y-axis.
-            xlims: List used to define limits for the x-axis.
-            save_path: for saving the figure in the specified path './path/name.png'.
-            dpi: resolution of the saved fig.
-            format: format of the fig, e.g, pdf, png, etc.
-        Returns: |matplotlib-Figure|
-        """
-        if l is None:            
-            raise ValueError("Angular momentum not specified.")
-
-        #### Checking if the atom indices are correct ####
-
-        if atom_set is None:
-            raise ValueError("At least one atom subset must be specified")
-    
-        # If it's a list of ints, make it a list of one list
-        if atom_set is not None:
-            # Check if the first element is an integer. 
-            # If so, the user passed [1, 2, 3] instead of [[1, 2, 3]]
-            if isinstance(atom_set[0], (int, np.integer)):
-                atom_set = [atom_set]
-
-        flat_at_list = [atom_idx for subset in atom_set for atom_idx in subset]
-        missing_elements = set(flat_at_list) - set(range(self.natom))
-        if missing_elements:
-            raise ValueError(f"The following atom indices are not valid: {missing_elements}")
-
-        if colors is None:
-            colors = self.get_colors(len(atom_set))
-        elif len(colors) != len(atom_set):
-            raise ValueError("Colors must contain the same elements as atomic subsets.")
-
-        
-
-        fig, ax= plt.subplots(figsize=(8, 6))
-
-
-        ebands = self.bands_eV - e0        
-        x = np.arange(self.nkpoints)
-        mybands = list(range(self.no_bands)) if band_list is None else band_list
-
-        for i in mybands:
-            ax.plot(x, ebands[0,i,:], color='black')
-
-        for spin in range(self.nsppol):            
-            for ib, band in enumerate(mybands):
-                yup = ebands[spin, band,:]
-                ydown = yup
-                for set_idx, at_set in enumerate(atom_set):
-                    wlk = self.get_wl_sets(atom_subset=at_set, spin=spin, band=band) * (fact / 2)
-                    w = wlk[l]
-                    #print(w.shape)
-                    y1, y2 = yup + w, ydown - w
-                    # Add width around each band. Only the [0,0] plot has the legend.
-                    ax.fill_between(x, yup, y1, alpha=transparency, facecolor=colors[set_idx])
-                    ax.fill_between(x, ydown, y2, alpha=transparency, facecolor=colors[set_idx],
-                                    label=f"set {set_idx+1}"  if ib == 0 else None)
-        ax.legend(
-            loc='lower center', 
-            bbox_to_anchor=(0.5, 1.015), 
-            ncol=len(atom_set), 
-            shadow=False, 
-            frameon=True
-        )
-        ax.set_title('l=' + self.l_to_symbol[l], pad=35)
-        ax.set_xlabel('K-point')
-        ax.set_ylabel('Energy (eV)')
-
-        if ylims is not None:
-            ax.set_ylim(ylims[0],ylims[1])
-
-        if xlims is not None:
-            ax.set_xlim(xlims[0],xlims[1])
-
-        if xval_ticks is not None:
-            # Si hay posiciones, las ponemos. Si además hay etiquetas, se pasan como 'labels'
-            ax.set_xticks(xval_ticks, labels=xticks)
-        elif xticks is not None:
-            # Si hay etiquetas pero no posiciones (xval_ticks es None)
-            raise ValueError("Values for the ticks not defined")
-
-
-        self._save_and_handle_kwargs(fig, **kwargs)
-
-        return fig, ax
-
-    def plot_fatbands_mview(self, e0=0, band_list=None, spin=None, l=None, atom_set=None, colors=None,
-                         fact=1.0, transparency=0.5,xticks=None,xval_ticks=None, ylims=None, xlims=None, **kwargs):
-        """
-        Plot the electronic fatbands grouped by LM.
-
-        Args:
-            iatom: Index of the atom in the structure.
-            e0: Option used to define the zero of energy in the band structure plot. Possible values:
-                - ``fermie``: shift all eigenvalues to have zero energy at the Fermi energy.
-                -  Number e.g ``e0 = 0.5``: shift all eigenvalues to have zero energy at 0.5 eV
-                -  None: Don't shift energies, equivalent to ``e0 = 0``
-            fact:  float used to scale the stripe size.
-            ylims: Set the data limits for the y-axis. Accept tuple e.g. ``(left, right)``
-                   or scalar e.g. ``left``. If left (right) is None, default values are used
-            blist: List of band indices for the fatband plot. If None, all bands are included
-
-        Returns: |matplotlib-Figure|
-        """
-        if l is None:            
-            raise ValueError("Angular momentum not specified.")
-
-
-        fig, ax= plt.subplots(figsize=(8, 6))
-
+        ################################ COLOR MANAGEMENT ########################
         m_vals = 2 * l + 1
-
-
-        idx_to_name = {
-            0: 's',
-            1: 'py',
-            2: 'pz',
-            3: 'px',
-            4: 'dxy',
-            5: 'dyz',
-            6: 'dz2',
-            7: 'dxz',
-            8: 'dx2-y2',
-            9: 'f_y3x2',
-            10: 'f_xyz',
-            11: 'f_yz2',
-            12: 'f_z3',
-            13: 'f_xz2',
-            14: 'f_zx2y2',
-            15: 'f_x3y2',
-            16: 'g0',
-            17: 'g1',
-            18: 'g2',
-            19: 'g3',
-            20: 'g4',
-            21: 'g5',
-            22: 'g6',
-            23: 'g7',
-            24: 'g8'
-        }
+        n_main = len(atm_symbols)
+        n_m = len(atm_symbols_m) * m_vals
         
+        full_palette = self.get_colors(n_main + n_m)
+
+        if atm_symbols and colors is None:
+            colors = full_palette[:n_main]
+        elif atm_symbols and len(colors) != n_main:
+            raise ValueError(f"Colors must contain {n_main} elements.")
+
+        if atm_symbols_m and colors_m is None:
+            colors_m = full_palette[n_main:]
+        elif atm_symbols_m and len(colors_m) != n_m:
+            raise ValueError(f"Colors_m must contain {n_m} elements.")
+
+        ################################################# INITIALIZE PLOT ###################################
+        fig, ax = plt.subplots(figsize=(8, 6))
         ebands = self.bands_eV - e0        
         x = np.arange(self.nkpoints)
         mybands = list(range(self.no_bands)) if band_list is None else band_list
-
-        
-#        for spin in range(self.nsppol):
-#            ebands.plot_ax(ax, e0, spin=spin, **self.eb_plotax_kwargs(spin))
-
-
-        if atom_set is None:
-            raise ValueError("At least one atom subset must be specified")
-    
-        # If it's a list of ints, make it a list of one list
-        if atom_set is not None:
-            # Check if the first element is an integer. 
-            # If so, the user passed [1, 2, 3] instead of [[1, 2, 3]]
-            if isinstance(atom_set[0], (int, np.integer)):
-                atom_set = [atom_set]
-
-        flat_at_list = [atom_idx for subset in atom_set for atom_idx in subset]
-        missing_elements = set(flat_at_list) - set(range(self.natom))
-        if missing_elements:
-            raise ValueError(f"The following atom indices are not valid: {missing_elements}")
-
-        if colors is None:
-            colors = self.get_colors(len(atom_set) * (2*l+1))
-#        elif len(colors) != len(atom_set):
-#            raise ValueError("Colors must contain the same elements as atomic subsets.")
-
-        for spin in range(self.nsppol):            
-            for ib, band in enumerate(mybands):
-                ax.plot(x, ebands[0,band,:], color='black', zorder=0) # band structure
-                yup = ebands[spin, band,:]
-                ydown = yup
-                for set_idx, at_set in enumerate(atom_set): 
-                    for mval in range(m_vals):                         
-                        wlk_m = self.get_wlm_sets(atom_subset=at_set, spin=spin, l_val=l, band=band) * (fact / 2)
-                        w = wlk_m[mval]
-                        y1, y2 = yup + w, ydown - w
-                        # Add width around each band.
-                        ax.fill_between(x, yup, y1, alpha=transparency, facecolor=colors[mval + m_vals*set_idx])
-                        ax.fill_between(x, ydown, y2, alpha=transparency, facecolor=colors[mval + m_vals*set_idx],
-                        label=f"set {set_idx+1} - {idx_to_name[l**2 + mval]}"  if ib == 0 else None)                        
-
-        ax.legend(
-            loc='upper left',           # The point on the legend we are 'holding'
-            bbox_to_anchor=(1.01, 1),   # Coordinates: slightly right of the plot (x=1.02), at the top (y=1)
-            ncol=1,                     # Standard single column for a vertical list
-            shadow=False, 
-            frameon=True
-        )
-        ax.set_title('l=' + self.l_to_symbol[l], pad=35)
-        ax.set_xlabel('K-point')
-        ax.set_ylabel('Energy (eV)')
-
-        if ylims is not None:
-            ax.set_ylim(ylims[0],ylims[1])
-
-        if xlims is not None:
-            ax.set_xlim(xlims[0],xlims[1])
-
-        if xval_ticks is not None:
-            # Si hay posiciones, las ponemos. Si además hay etiquetas, se pasan como 'labels'
-            ax.set_xticks(xval_ticks, labels=xticks)
-        elif xticks is not None:
-            # Si hay etiquetas pero no posiciones (xval_ticks es None)
-            raise ValueError("Values for the ticks not defined")
-
-
-        self._save_and_handle_kwargs(fig, **kwargs)
-
-
-        return fig, ax
-
-
-
-    def plot_fatbands_mview_type(self, e0=0, band_list=None, spin=None, l=None, symbol=None, colors=None,
-                         fact=1.0, transparency=0.5,xticks=None,xval_ticks=None, ylims=None, xlims=None, **kwargs):
-
-        """
-        Plot the electronic fatbands for a specific L. Atoms are grouped by type.
-
-        Args:
-            e0: Option used to define the zero of energy in the band structure plot.
-            band_list: List of band indices for the fatband plot. If None, all bands are included.
-            l: Angular momentum used to calculate the orbital projection.
-            colors: list containing the colores used for each stripe.
-            symbols: Atom type(s) included in the fatbands. Can be a string e.g 'Pb'. A list or an array of strings. 
-            fact: float used to scale the stripe size.
-            transparency: controls the transparency of the stripes
-            xticks: list with labels of the ticks.
-            xval_ticks: list containing the values where the ticks will be located.
-            ylims: list used to define limits for the y-axis.
-            xlims: list used to define limits for the x-axis.
-            save_path: for saving the figure in the specified path './path/name.png'.
-            dpi: resolution of the saved fig.
-            format: format of the fig, e.g, pdf, png, etc.
-        Returns: |matplotlib-Figure|
-        """
-        # string elements in self.species_map.values()
-        valid_species = set(self.species_map.values())
-  
-        if l is None:            
-            raise ValueError("Angular momentum not specified.")
-
-        #  If nothing is specified, use all species in the system
-        if symbol is None:            
-            atm_symbols = valid_species 
-
-        elif isinstance(symbol, str):
-            # If it's a single string "Si", wrap it in a list ["Si"]
-            atm_symbols = [symbol]
-        elif isinstance(symbol, (list, np.ndarray)):
-            # If it's already a list or numpy array, use it directly
-            atm_symbols = list(symbol)
-        else:
-            # Handle Xarray or other iterables safely
-            atm_symbols = list(symbol)
-        #Check that every requested symbol actually exists in the file
-        
-        for s in atm_symbols:
-            if s not in valid_species:
-                raise ValueError(f"Incorrect element specified: '{s}'. "
-                                 f"Valid species in this file are: {valid_species}")
-
-        fig, ax= plt.subplots(figsize=(8, 6))
-
-        m_vals = 2 * l + 1
 
 
         idx_to_name = {
@@ -821,60 +546,179 @@ class FatbandsPlotter:
             24: 'g8'
         }
 
+        ############################ PLOTTING LOOPS ##################################
+        for spin in range(self.nsppol):            
+            for ib, band in enumerate(mybands):
+                # Background band structure
+                ax.plot(x, ebands[spin, band, :], color='black', zorder=0)
+                
+                y_base = ebands[spin, band, :]
+
+                ############## DRAW TOTAL L #########################
+                for idx, s in enumerate(atm_symbols):
+                    w = self.get_wl_symbol(s, spin=spin, band=band)[l] * (fact / 2)
+                    ax.fill_between(x, y_base - w, y_base + w, alpha=transparency, 
+                                    facecolor=colors[idx], label=s if ib == 0 else None)
+
+                ############## DRAW TOTAL M #########################
+                for idx, s in enumerate(atm_symbols_m):
+                    wlk_m = self.get_wlm_symbol(symbol=s, l_val=l, spin=spin, band=band) * (fact / 2)
+                    for mval in range(m_vals):
+                        w = wlk_m[mval]
+                        c = colors_m[mval + m_vals*idx]
+                        lbl = f"{s}-{idx_to_name[l**2 + mval]}" if ib == 0 else None
+                        ax.fill_between(x, y_base - w, y_base + w, alpha=transparency, 
+                                        facecolor=c, label=lbl)
+
+        #####################5. FINAL FORMATTING ###########################
+        self._apply_standard_formatting(ax, l, xticks, xval_ticks, ylims, xlims)
+        self._save_and_handle_kwargs(fig, **kwargs)
+
+        return fig, ax
+        
+###########################################################################################
+###########################################################################################
+###########################################################################################
+
+    def plot_fatbands_atomsets(self, e0=0, band_list=None, l=None, 
+                              atom_set=None, atom_set_m=None, 
+                              colors=None, colors_m=None,
+                              fact=1.0, transparency=0.5, 
+                              xticks=None, xval_ticks=None, 
+                              ylims=None, xlims=None, **kwargs):
+        """
+        Plot the m-decomposed electronic fatbands for a specific L for each atomic subset.
+        Args:
+            e0: Option used to define the zero of energy in the band structure plot.
+            band_list: List of band indices for the fatband plot. If None, all bands are included.
+            l: Angular momentum used to calculate the orbital projection.
+            colors and colors_m: list containing the colores used for plotting the contributions 
+                                 of the L and LM resolve plots respectively.
+            atom_set: Define the subset for the the L decomposition.
+            atom_set_m: Define the subset for the the LM decomposition.           
+            fact: float used to scale the stripe size.
+            transparency: controls the transparency of the stripes
+            xticks: list with labels of the ticks.
+            xval_ticks: list containing the values where the ticks will be located.
+            ylims: list used to define limits for the y-axis.
+            xlims: list used to define limits for the x-axis.
+            save_path: for saving the figure in the specified path './path/name.png'.
+            dpi: resolution of the saved fig.
+            format: format of the fig, e.g, pdf, png, etc.
+        Returns: |matplotlib-Figure|
+        """
+        if l is None:            
+            raise ValueError("Angular momentum not specified.")
+        if atom_set is None and atom_set_m is None:
+            raise ValueError("At least one atom subset (atom_set or atom_set_m) must be specified")
+
+        ######NORMALIZE AND VALIDATE ATOM SETS###############
+        def normalize_sets(aset):
+            if aset is None: return []
+            # Handle [1, 2] -> [[1, 2]]
+            if isinstance(aset[0], (int, np.integer)):
+                aset = [aset]
+            # Validate indices
+            flat = [idx for subset in aset for idx in subset]
+            if any(i >= self.natom or i < 0 for i in flat):
+                raise ValueError(f"Invalid atom indices in {aset}")
+            return aset
+
+        sets = normalize_sets(atom_set)
+        sets_m = normalize_sets(atom_set_m)
+
+        ################### CHECK FOR OVERLAP ###################
+        # Plot the L and LM contribution of the same atoms is redundant.
+        # Compare them as tuples
+        set_tuples = [tuple(sorted(s)) for s in sets]
+        set_m_tuples = [tuple(sorted(s)) for s in sets_m]
+        overlap = set(set_tuples).intersection(set(set_m_tuples))
+        if overlap:
+            raise ValueError(f"The following atom subsets are repeated: {overlap}")
+
+        ################################ COLOR MANAGEMENT ########################
+        m_vals = 2 * l + 1
+        n_main = len(sets)
+        n_m = len(sets_m) * m_vals
+        
+        all_colors = self.get_colors(n_main + n_m)
+
+        if sets and colors is None:
+            colors = all_colors[:n_main]
+        if sets_m and colors_m is None:
+            colors_m = all_colors[n_main:]
+
+        ################################################# INITIALIZE PLOT ###################################
+        fig, ax = plt.subplots(figsize=(8, 6))
         ebands = self.bands_eV - e0        
         x = np.arange(self.nkpoints)
         mybands = list(range(self.no_bands)) if band_list is None else band_list
+        idx_to_name = {
+            0: 's',
+            1: 'py',
+            2: 'pz',
+            3: 'px',
+            4: 'dxy',
+            5: 'dyz',
+            6: 'dz2',
+            7: 'dxz',
+            8: 'dx2-y2',
+            9: 'f_y3x2',
+            10: 'f_xyz',
+            11: 'f_yz2',
+            12: 'f_z3',
+            13: 'f_xz2',
+            14: 'f_zx2y2',
+            15: 'f_x3y2',
+            16: 'g0',
+            17: 'g1',
+            18: 'g2',
+            19: 'g3',
+            20: 'g4',
+            21: 'g5',
+            22: 'g6',
+            23: 'g7',
+            24: 'g8'
+        }
 
-        if colors is None:
-            colors = self.get_colors(len(atm_symbols) * (2*l+1))
-    #    elif len(colors) != len(self.species_map):
-    #        raise ValueError("Colors must contain the same elements as atom types.")
-        
+        # Plot underlying band structure
+        for spin in range(self.nsppol):               
+            for i in mybands:
+                ax.plot(x, ebands[spin,i,:], color='black', zorder=0)
+
+        ########################### PLOTTING LOOPS #############################################
         for spin in range(self.nsppol):            
             for ib, band in enumerate(mybands):
-                ax.plot(x, ebands[0,band,:], color='black', zorder=0) # band structure
-                yup = ebands[spin, band,:]
-                ydown = yup
-                for idx, symbol in enumerate(atm_symbols):
-                    for mval in range(m_vals):                         
-                        wlk_m = self.get_wlm_symbol(symbol=symbol, l_val=l, spin=spin, band=band) * (fact / 2)
-                        w = wlk_m[mval]
-                        y1, y2 = yup + w, ydown - w
-                        # Add width around each band.
-                        ax.fill_between(x, yup, y1, alpha=transparency, facecolor=colors[mval + m_vals*idx])
-                        ax.fill_between(x, ydown, y2, alpha=transparency, facecolor=colors[mval + m_vals*idx],
-                        label=f"{symbol} - {idx_to_name[l**2 + mval]}"  if ib == 0 else None)    
+                y_base = ebands[spin, band, :]
+                
+                ############## DRAW TOTAL L SUBSETS #########################
+                for idx, a_set in enumerate(sets):
+                    w = self.get_wl_sets(atom_subset=a_set, spin=spin, band=band)[l] * (fact/2)
+                    ax.fill_between(x, y_base-w, y_base+w, facecolor=colors[idx], 
+                                    alpha=transparency, label=f"Set {idx+1}" if ib==0 else None)
 
-        ax.legend(
-            loc='upper left',           # The point on the legend we are 'holding'
-            bbox_to_anchor=(1.01, 1),   # Coordinates: slightly right of the plot (x=1.02), at the top (y=1)
-            ncol=1,                     # Standard single column for a vertical list
-            shadow=False, 
-            frameon=True
-        )
-        ax.set_title('l=' + self.l_to_symbol[l], pad=35)
-        ax.set_xlabel('K-point')
-        ax.set_ylabel('Energy (eV)')
+                ############## DRAW M-DECOMPOSED SUBSETS ########################
+                for idx, a_set in enumerate(sets_m):
+                    w_m = self.get_wlm_sets(atom_subset=a_set, spin=spin, l_val=l, band=band) * (fact/2)
+                    for mval in range(m_vals):
+                        w = w_m[mval]
+                        c = colors_m[mval + m_vals*idx]
+                        lbl = f"Set {idx+1}-{idx_to_name[l**2+mval]}" if ib==0 else None
+                        ax.fill_between(x, y_base-w, y_base+w, facecolor=c, alpha=transparency, label=lbl)
 
-        if ylims is not None:
-            ax.set_ylim(ylims[0],ylims[1])
-
-        if xlims is not None:
-            ax.set_xlim(xlims[0],xlims[1])
-
-        if xval_ticks is not None:
-            # Si hay posiciones, las ponemos. Si además hay etiquetas, se pasan como 'labels'
-            ax.set_xticks(xval_ticks, labels=xticks)
-        elif xticks is not None:
-            # Si hay etiquetas pero no posiciones (xval_ticks es None)
-            raise ValueError("Values for the ticks not defined")
-
+        ####################### FORMATTING (Standard for both) #################################
+        self._apply_standard_formatting(ax, l, xticks, xval_ticks, ylims, xlims)
         self._save_and_handle_kwargs(fig, **kwargs)
-
-
         return fig, ax
 
 
+
+
+
+
+
+
+ 
 
 
 # --- Execution ---
@@ -894,10 +738,11 @@ Pb=atom1=[0,1,2]
 #Gr=atom1=[3,4,5,6,7,8,9,10]
 #SiC=list(range(11,50))
 at_sets=[Pb]#,Gr,SiC]
-viewer.plot_fatbands_mview_type(band_list=list(range(150,250)), e0=2.77561,
-                                l=2,ylims=[-2,2], symbol=['Pb','Si'],
-                                xval_ticks=[0,30,60,90],
-                                save_path='./test_2.png')
+
+
+viewer.plot_fatbands_symbol(band_list=list(range(150,250)), e0=2.77561,
+                                l=1,ylims=[-2,2], symbol='Pb',
+                                xval_ticks=[0,30,60,90])
 #viewer.plot_fatbands_l(band_list=list(range(150,250)), l=0)
 plt.show()
 
