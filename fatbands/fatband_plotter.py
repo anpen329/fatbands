@@ -53,7 +53,6 @@ class FatbandsPlotter:
         ########################
         self.ncfile = xr.open_dataset(nc_file)
 
-        self.prtdos=self.ncfile['prtdos']
         self.atom_spc = self.ncfile['atom_species']
         self.atom_number = self.ncfile['atomic_numbers']                
         self.lmax = self.ncfile['lmax_type']
