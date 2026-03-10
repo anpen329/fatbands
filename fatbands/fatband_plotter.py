@@ -547,13 +547,27 @@ class FatbandsPlotter:
         }
 
         ############################ PLOTTING LOOPS ##################################
-        for spin in range(self.nsppol):            
-            for ib, band in enumerate(mybands):
-                # Background band structure
-                ax.plot(x, ebands[spin, band, :], color='black', zorder=0)
-                
-                y_base = ebands[spin, band, :]
 
+        # Plot underlying band structure
+        for spin in range(self.nsppol):
+            # Determine marker based on spin index if spin-polarized
+            marker = None
+            if self.nsppol > 1:
+                marker = "v" if spin == 0 else "^"
+            
+            for i in mybands:
+                ax.plot(
+                    x, 
+                    ebands[spin, i, :], 
+                    color='black', 
+                    marker=marker, 
+                    markevery=10,  # Adjust this so the plot isn't too crowded
+                    zorder=0
+                )
+
+        for spin in range(self.nsppol):            
+            for ib, band in enumerate(mybands):              
+                y_base = ebands[spin, band, :]
                 ############## DRAW TOTAL L #########################
                 for idx, s in enumerate(atm_symbols):
                     w = self.get_wl_symbol(s, spin=spin, band=band)[l] * (fact / 2)
@@ -682,15 +696,26 @@ class FatbandsPlotter:
         }
 
         # Plot underlying band structure
-        for spin in range(self.nsppol):               
+        for spin in range(self.nsppol):
+            # Determine marker based on spin index if spin-polarized
+            marker = None
+            if self.nsppol > 1:
+                marker = "v" if spin == 0 else "^"
+            
             for i in mybands:
-                ax.plot(x, ebands[spin,i,:], color='black', zorder=0)
+                ax.plot(
+                    x, 
+                    ebands[spin, i, :], 
+                    color='black', 
+                    marker=marker, 
+                    markevery=10,  # Adjust this so the plot isn't too crowded
+                    zorder=0
+                )
 
         ########################### PLOTTING LOOPS #############################################
         for spin in range(self.nsppol):            
             for ib, band in enumerate(mybands):
-                y_base = ebands[spin, band, :]
-                
+                y_base = ebands[spin, band, :]                
                 ############## DRAW TOTAL L SUBSETS #########################
                 for idx, a_set in enumerate(sets):
                     w = self.get_wl_sets(atom_subset=a_set, spin=spin, band=band)[l] * (fact/2)
@@ -740,8 +765,8 @@ Pb=atom1=[0,1,2]
 at_sets=[Pb]#,Gr,SiC]
 
 
-viewer.plot_fatbands_symbol(band_list=list(range(150,250)), e0=2.77561,
-                                l=1,ylims=[-2,2], symbol='Pb',
+viewer.plot_fatbands_atomsets(band_list=list(range(150,250)), e0=2.77561,
+                                l=1,ylims=[-2,2], atom_set=[0,1,2], atom_set_m=[3,4,5,6,7,8,9,10],
                                 xval_ticks=[0,30,60,90])
 #viewer.plot_fatbands_l(band_list=list(range(150,250)), l=0)
 plt.show()
